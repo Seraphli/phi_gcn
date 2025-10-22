@@ -3,14 +3,15 @@ import os
 try:
     import gymnasium as gym
     from gymnasium.spaces.box import Box
-    
+
     # Register ALE environments for new gymnasium
     try:
         import ale_py
+
         gym.register_envs(ale_py)
     except Exception:
         pass  # Silently continue if registration fails
-        
+
 except ImportError:
     import gym
     from gym.spaces.box import Box
@@ -44,60 +45,46 @@ except ImportError:
     pass
 
 
+class SeedWrapper(gym.Wrapper):
+    def __init__(self, env: gym.Env, seed: int):
+        super().__init__(env)
+        self._seed = seed
+
+    def reset(self, seed=None, **kwargs):
+        if seed is None:
+            return self.env.reset(seed=self._seed, **kwargs)
+        return self.env.reset(seed=seed, **kwargs)
+
+
 def make_env(env_id, seed, rank, log_dir, add_timestep, allow_early_resets):
     def _thunk():
         env = gym.make(env_id)
 
-        # Updated Atari detection for gymnasium
-        is_atari = False
-        try:
-            # Check for gymnasium ALE environment
-            import ale_py
-            is_atari = hasattr(env.unwrapped, 'ale') or 'NoFrameskip' in env_id
-        except ImportError:
-            # Fallback to legacy gym detection
-            is_atari = hasattr(gym.envs, 'atari') and hasattr(env.unwrapped, 'ale')
-        
+        # Simple Atari detection
+        is_atari = "NoFrameskip" in env_id or hasattr(env.unwrapped, "ale")
+
         if is_atari:
             env = make_atari(env_id)
-        
-        # Handle seeding for both gym versions
-        env._seed = seed + rank  # Store seed for later use in reset
-        
-        # First try the old gym method
-        try:
-            env.seed(seed + rank)
-        except (AttributeError, TypeError):
-            # For gymnasium, we need to pass seed to reset() method
-            # Store the seed in the environment for later use
-            pass
-        
-        # Always seed the action and observation spaces
-        try:
-            if hasattr(env.action_space, 'seed'):
-                env.action_space.seed(seed + rank)
-            if hasattr(env.observation_space, 'seed'):
-                env.observation_space.seed(seed + rank)
-        except (AttributeError, TypeError):
-            pass
+
+        # Use gymnasium-style seeding with SeedWrapper
+        env = SeedWrapper(env, seed + rank)
 
         obs_shape = env.observation_space.shape
 
-        if add_timestep and len(
-                obs_shape) == 1 and str(env).find('TimeLimit') > -1:
+        if add_timestep and len(obs_shape) == 1 and str(env).find("TimeLimit") > -1:
             env = AddTimestep(env)
 
         if log_dir is not None:
-           env = Monitor(env, os.path.join(log_dir, str(rank)),
-                               allow_early_resets=allow_early_resets)
-
-
+            env = Monitor(
+                env,
+                os.path.join(log_dir, str(rank)),
+                allow_early_resets=allow_early_resets,
+            )
 
         if is_atari:
             if len(env.observation_space.shape) == 3:
                 env = wrap_deepmind(env)
 
-                
         # If the input has shape (W,H,3), wrap for PyTorch convolutions
         obs_shape = env.observation_space.shape
         if len(obs_shape) == 3 and obs_shape[2] in [1, 3]:
@@ -107,25 +94,36 @@ def make_env(env_id, seed, rank, log_dir, add_timestep, allow_early_resets):
 
     return _thunk
 
-def make_vec_envs(env_name, seed, num_processes, gamma, log_dir, add_timestep, device, allow_early_resets):
-    envs = [make_env(env_name, seed, i, log_dir, add_timestep, allow_early_resets) for i in range(num_processes)]
+
+def make_vec_envs(
+    env_name,
+    seed,
+    num_processes,
+    gamma,
+    log_dir,
+    add_timestep,
+    device,
+    allow_early_resets,
+):
+    envs = [
+        make_env(env_name, seed, i, log_dir, add_timestep, allow_early_resets)
+        for i in range(num_processes)
+    ]
 
     if len(envs) > 1:
         envs = SubprocVecEnv(envs)
     else:
         envs = DummyVecEnv(envs)
 
-
     if len(envs.observation_space.shape) == 1:
         envs = VecNormalize(envs, ret=False)
-
 
     envs = VecPyTorch(envs, device)
 
     if len(envs.observation_space.shape) == 3:
-        print('Creating frame stacking wrapper')
+        print("Creating frame stacking wrapper")
         envs = VecPyTorchFrameStack(envs, 4, device)
-        #print(envs.observation_space)
+        # print(envs.observation_space)
 
     return envs
 
@@ -136,15 +134,33 @@ class VecNormalize(VecEnvWrapper):
     and returns from an environment.
     """
 
-    def __init__(self, venv, ob=True, ret=False, clipob=5., cliprew=10., gamma=0.99, epsilon=1e-8, use_tf=False):
+    def __init__(
+        self,
+        venv,
+        ob=True,
+        ret=False,
+        clipob=5.0,
+        cliprew=10.0,
+        gamma=0.99,
+        epsilon=1e-8,
+        use_tf=False,
+    ):
         VecEnvWrapper.__init__(self, venv)
         if use_tf:
             from running_mean_std import TfRunningMeanStd
-            self.ob_rms = TfRunningMeanStd(shape=self.observation_space.shape, scope='ob_rms') if ob else None
-            self.ret_rms = TfRunningMeanStd(shape=(), scope='ret_rms') if ret else None
+
+            self.ob_rms = (
+                TfRunningMeanStd(shape=self.observation_space.shape, scope="ob_rms")
+                if ob
+                else None
+            )
+            self.ret_rms = TfRunningMeanStd(shape=(), scope="ret_rms") if ret else None
         else:
             from running_mean_std import RunningMeanStd
-            self.ob_rms = RunningMeanStd(shape=self.observation_space.shape) if ob else None
+
+            self.ob_rms = (
+                RunningMeanStd(shape=self.observation_space.shape) if ob else None
+            )
             self.ret_rms = RunningMeanStd(shape=()) if ret else None
         self.clipob = clipob
         self.cliprew = cliprew
@@ -158,14 +174,22 @@ class VecNormalize(VecEnvWrapper):
         obs = self._obfilt(obs)
         if self.ret_rms:
             self.ret_rms.update(self.ret)
-            rews = np.clip(rews / np.sqrt(self.ret_rms.var + self.epsilon), -self.cliprew, self.cliprew)
-        self.ret[news] = 0.
+            rews = np.clip(
+                rews / np.sqrt(self.ret_rms.var + self.epsilon),
+                -self.cliprew,
+                self.cliprew,
+            )
+        self.ret[news] = 0.0
         return obs, rews, news, infos
 
     def _obfilt(self, obs):
         if self.ob_rms:
             self.ob_rms.update(obs)
-            obs = np.clip((obs - self.ob_rms.mean) / np.sqrt(self.ob_rms.var + self.epsilon), -self.clipob, self.clipob)
+            obs = np.clip(
+                (obs - self.ob_rms.mean) / np.sqrt(self.ob_rms.var + self.epsilon),
+                -self.clipob,
+                self.clipob,
+            )
             return obs
         else:
             return obs
@@ -174,6 +198,7 @@ class VecNormalize(VecEnvWrapper):
         self.ret = np.zeros(self.num_envs)
         obs = self.venv.reset()
         return self._obfilt(obs)
+
 
 # Can be used to test recurrent policies for Reacher-v2
 class MaskGoal(gym.ObservationWrapper):
@@ -190,7 +215,8 @@ class AddTimestep(gym.ObservationWrapper):
             self.observation_space.low[0],
             self.observation_space.high[0],
             [self.observation_space.shape[0] + 1],
-            dtype=self.observation_space.dtype)
+            dtype=self.observation_space.dtype,
+        )
 
     def observation(self, observation):
         return np.concatenate((observation, [self.env._elapsed_steps]))
@@ -204,7 +230,8 @@ class TransposeImage(gym.ObservationWrapper):
             self.observation_space.low[0, 0, 0],
             self.observation_space.high[0, 0, 0],
             [obs_shape[2], obs_shape[1], obs_shape[0]],
-            dtype=self.observation_space.dtype)
+            dtype=self.observation_space.dtype,
+        )
 
     def observation(self, observation):
         return observation.transpose(2, 1, 0)
@@ -246,25 +273,27 @@ class VecPyTorchFrameStack(VecEnvWrapper):
         self.stackedobs = np.zeros((venv.num_envs,) + low.shape)
         self.stackedobs = torch.from_numpy(self.stackedobs).float()
         self.stackedobs = self.stackedobs.to(device)
-        observation_space = gym.spaces.Box(low=low, high=high, dtype=venv.observation_space.dtype)
+        observation_space = gym.spaces.Box(
+            low=low, high=high, dtype=venv.observation_space.dtype
+        )
         VecEnvWrapper.__init__(self, venv, observation_space=observation_space)
 
     def step_wait(self):
         # import pdb;pdb.set_trace()
         obs, rews, news, infos = self.venv.step_wait()
-        wut= self.stackedobs[:, self.shape_dim0:].clone()
-        self.stackedobs[:, :-self.shape_dim0] = wut
+        wut = self.stackedobs[:, self.shape_dim0 :].clone()
+        self.stackedobs[:, : -self.shape_dim0] = wut
         # self.stackedobs[:, :-self.shape_dim0] = self.stackedobs[:, self.shape_dim0:]
-        for (i, new) in enumerate(news):
+        for i, new in enumerate(news):
             if new:
                 self.stackedobs[i] = 0
-        self.stackedobs[:, -self.shape_dim0:] = obs
+        self.stackedobs[:, -self.shape_dim0 :] = obs
         return self.stackedobs, rews, news, infos
 
     def reset(self):
         obs = self.venv.reset()
         self.stackedobs.fill_(0)
-        self.stackedobs[:, -self.shape_dim0:] = obs
+        self.stackedobs[:, -self.shape_dim0 :] = obs
         return self.stackedobs
 
     def close(self):

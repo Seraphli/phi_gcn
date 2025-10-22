@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
-class VecEnv(ABC):
 
+class VecEnv(ABC):
     def __init__(self, num_envs, observation_space, action_space):
         self.num_envs = num_envs
         self.observation_space = observation_space
@@ -10,6 +10,7 @@ class VecEnv(ABC):
     """
     An abstract asynchronous, vectorized environment.
     """
+
     @abstractmethod
     def reset(self):
         """
@@ -59,16 +60,19 @@ class VecEnv(ABC):
         return self.step_wait()
 
     def render(self):
-        #logger.warn('Render not defined for %s'%self)
+        # logger.warn('Render not defined for %s'%self)
         pass
+
 
 class VecEnvWrapper(VecEnv):
     def __init__(self, venv, observation_space=None, action_space=None):
         self.venv = venv
-        VecEnv.__init__(self,
+        VecEnv.__init__(
+            self,
             num_envs=venv.num_envs,
             observation_space=observation_space or venv.observation_space,
-            action_space=action_space or venv.action_space)
+            action_space=action_space or venv.action_space,
+        )
 
     def step_async(self, actions):
         self.venv.step_async(actions)
@@ -87,15 +91,21 @@ class VecEnvWrapper(VecEnv):
     def render(self):
         self.venv.render()
 
+
 class CloudpickleWrapper(object):
     """
     Uses cloudpickle to serialize contents (otherwise multiprocessing tries to use pickle)
     """
+
     def __init__(self, x):
         self.x = x
+
     def __getstate__(self):
         import cloudpickle
+
         return cloudpickle.dumps(self.x)
+
     def __setstate__(self, ob):
         import pickle
+
         self.x = pickle.loads(ob)
