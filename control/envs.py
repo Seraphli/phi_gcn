@@ -1,9 +1,21 @@
 import os
 
-import gym
+try:
+    import gymnasium as gym
+    from gymnasium.spaces.box import Box
+    
+    # Register ALE environments for new gymnasium
+    try:
+        import ale_py
+        gym.register_envs(ale_py)
+    except Exception:
+        pass  # Silently continue if registration fails
+        
+except ImportError:
+    import gym
+    from gym.spaces.box import Box
 import numpy as np
 import torch
-from gym.spaces.box import Box
 
 from monitor import Monitor
 from atari_wrappers import make_atari, wrap_deepmind
@@ -36,13 +48,38 @@ def make_env(env_id, seed, rank, log_dir, add_timestep, allow_early_resets):
     def _thunk():
         env = gym.make(env_id)
 
-        is_atari = hasattr(gym.envs, 'atari') and isinstance(
-            env.unwrapped, gym.envs.atari.atari_env.AtariEnv)
-        if is_atari:
-            env = make_atari(env_id)        
+        # Updated Atari detection for gymnasium
+        is_atari = False
+        try:
+            # Check for gymnasium ALE environment
+            import ale_py
+            is_atari = hasattr(env.unwrapped, 'ale') or 'NoFrameskip' in env_id
+        except ImportError:
+            # Fallback to legacy gym detection
+            is_atari = hasattr(gym.envs, 'atari') and hasattr(env.unwrapped, 'ale')
         
-
-        env.seed(seed + rank)
+        if is_atari:
+            env = make_atari(env_id)
+        
+        # Handle seeding for both gym versions
+        env._seed = seed + rank  # Store seed for later use in reset
+        
+        # First try the old gym method
+        try:
+            env.seed(seed + rank)
+        except (AttributeError, TypeError):
+            # For gymnasium, we need to pass seed to reset() method
+            # Store the seed in the environment for later use
+            pass
+        
+        # Always seed the action and observation spaces
+        try:
+            if hasattr(env.action_space, 'seed'):
+                env.action_space.seed(seed + rank)
+            if hasattr(env.observation_space, 'seed'):
+                env.observation_space.seed(seed + rank)
+        except (AttributeError, TypeError):
+            pass
 
         obs_shape = env.observation_space.shape
 

@@ -14,18 +14,45 @@ class DummyVecEnv(VecEnv):
 
     def step_wait(self):
         results = [env.step(a) for (a,env) in zip(self.actions, self.envs)]
-        obs, rews, dones, infos = map(np.array, zip(*results))
+        # Handle gymnasium format: obs, reward, terminated, truncated, info
+        obs, rews, terminateds, truncateds, infos = map(np.array, zip(*results))
+        dones = terminateds | truncateds  # Combine terminated and truncated
         self.ts += 1
         for (i, done) in enumerate(dones):
-            if done: 
-                obs[i] = self.envs[i].reset()
+            if done:
+                # Try gymnasium format first (with seed parameter)
+                if hasattr(self.envs[i], '_seed'):
+                    try:
+                        result = self.envs[i].reset(seed=self.envs[i]._seed)
+                        obs[i] = result[0] if isinstance(result, tuple) else result
+                    except TypeError:
+                        # Fallback to old gym format
+                        result = self.envs[i].reset()
+                        obs[i] = result[0] if isinstance(result, tuple) else result
+                else:
+                    result = self.envs[i].reset()
+                    obs[i] = result[0] if isinstance(result, tuple) else result
                 self.ts[i] = 0
         self.actions = None
         return np.array(obs), np.array(rews), np.array(dones), infos
 
-    def reset(self):        
-        results = [env.reset() for env in self.envs]
-        return np.array(results)
+    def reset(self):
+        results = []
+        for env in self.envs:
+            # Try gymnasium format first (with seed parameter)
+            if hasattr(env, '_seed'):
+                try:
+                    result = env.reset(seed=env._seed)
+                except TypeError:
+                    # Fallback to old gym format
+                    result = env.reset()
+            else:
+                result = env.reset()
+            results.append(result)
+        
+        # Handle gymnasium reset format: obs, info
+        obs = [result[0] if isinstance(result, tuple) else result for result in results]
+        return np.array(obs)
 
     def close(self):
         return

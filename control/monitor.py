@@ -1,6 +1,9 @@
 __all__ = ['Monitor', 'get_monitor_files', 'load_results']
 
-from gym.core import Wrapper
+try:
+    from gymnasium.core import Wrapper
+except ImportError:
+    from gym.core import Wrapper
 import time
 from glob import glob
 import csv
@@ -51,9 +54,10 @@ class Monitor(Wrapper):
     def step(self, action):
         if self.needs_reset:
             raise RuntimeError("Tried to step environment that needs reset")
-        ob, rew, done, info = self.env.step(action)
+        ob, rew, terminated, truncated, info = self.env.step(action)
+        done = terminated or truncated
         self.update(ob, rew, done, info)
-        return (ob, rew, done, info)
+        return (ob, rew, terminated, truncated, info)
 
     def update(self, ob, rew, done, info):
         self.rewards.append(rew)

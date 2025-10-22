@@ -84,6 +84,14 @@ def get_args():
                         help='Mixing coefficient between GCN losses.')
     parser.add_argument('--reward_freq', type=int, default=1,
                         help='Reward frequency.')
+    
+    # ClearML integration parameters
+    parser.add_argument('--use-clearml', action='store_true', default=False,
+                        help='Enable ClearML experiment tracking')
+    parser.add_argument('--clearml-project', type=str, default='Phi-GCN',
+                        help='ClearML project name')
+    parser.add_argument('--clearml-task', type=str, default=None,
+                        help='ClearML task name (auto-generated if not provided)')
 
     args = parser.parse_args()
 

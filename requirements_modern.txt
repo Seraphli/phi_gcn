@@ -1,0 +1,26 @@
+# Core dependencies for modern PyTorch (compatible with Python 3.12.10)
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.21.0
+scipy>=1.7.0
+
+# Gym and RL dependencies - use gymnasium instead of old gym
+gymnasium>=0.29.0  # Modern replacement for gym
+gymnasium[atari]   # Atari environments with proper ale-py support
+autorom[accept-rom-license]  # Automatically download Atari ROMs
+
+# Graph and network dependencies
+networkx>=2.8
+opencv-python>=4.5.0
+cloudpickle>=2.0.0
+
+# Experiment tracking and logging
+clearml>=1.13.0    # For experiment tracking and results upload
+
+# Optional MuJoCo support (if needed)
+# mujoco>=2.3.0
+# gymnasium[mujoco]
+
+# Development and testing (optional)
+# pytest>=7.0.0
+# jupyter>=1.0.0

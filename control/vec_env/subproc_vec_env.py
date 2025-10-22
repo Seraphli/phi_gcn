@@ -8,15 +8,43 @@ def worker(remote, parent_remote, env_fn_wrapper):
     while True:
         cmd, data = remote.recv()
         if cmd == 'step':
-            ob, reward, done, info = env.step(data)
+            # Only support gymnasium format: obs, reward, terminated, truncated, info
+            ob, reward, terminated, truncated, info = env.step(data)
+            done = terminated or truncated
+                
             if done:
-                ob = env.reset()
+                # Handle both gym and gymnasium reset formats
+                if hasattr(env, '_seed'):
+                    try:
+                        # Try gymnasium format with seed
+                        result = env.reset(seed=env._seed)
+                        ob = result[0] if isinstance(result, tuple) else result
+                    except TypeError:
+                        # Fallback to old gym format
+                        result = env.reset()
+                        ob = result[0] if isinstance(result, tuple) else result
+                else:
+                    result = env.reset()
+                    ob = result[0] if isinstance(result, tuple) else result
             remote.send((ob, reward, done, info))
         elif cmd == 'reset':
-            ob = env.reset()
+            # Handle both gym and gymnasium reset formats
+            if hasattr(env, '_seed'):
+                try:
+                    # Try gymnasium format with seed
+                    result = env.reset(seed=env._seed)
+                    ob = result[0] if isinstance(result, tuple) else result
+                except TypeError:
+                    # Fallback to old gym format
+                    result = env.reset()
+                    ob = result[0] if isinstance(result, tuple) else result
+            else:
+                result = env.reset()
+                ob = result[0] if isinstance(result, tuple) else result
             remote.send(ob)
         elif cmd == 'reset_task':
-            ob = env.reset_task()
+            # Only support gymnasium reset format: obs, info
+            ob, _ = env.reset_task()
             remote.send(ob)
         elif cmd == 'close':
             remote.close()
@@ -36,7 +64,11 @@ class SubprocVecEnv(VecEnv):
         self.closed = False
         nenvs = len(env_fns)
         self.remotes, self.work_remotes = zip(*[Pipe() for _ in range(nenvs)])
-        set_start_method('forkserver')
+        try:
+            set_start_method('forkserver')
+        except RuntimeError:
+            # Start method already set, continue
+            pass
         self.ps = [Process(target=worker, args=(work_remote, remote, CloudpickleWrapper(env_fn)))
             for (work_remote, remote, env_fn) in zip(self.work_remotes, self.remotes, env_fns)]
         for p in self.ps:

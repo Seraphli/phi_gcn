@@ -2,8 +2,12 @@ import numpy as np
 import os
 os.environ.setdefault('PATH', '')
 from collections import deque
-import gym
-from gym import spaces
+try:
+    import gymnasium as gym
+    from gymnasium import spaces
+except ImportError:
+    import gym
+    from gym import spaces
 import cv2
 cv2.ocl.setUseOpenCL(False)
 from wrappers import TimeLimit
@@ -19,21 +23,40 @@ class NoopResetEnv(gym.Wrapper):
         self.override_num_noops = None
         self.noop_action = 0
         assert env.unwrapped.get_action_meanings()[0] == 'NOOP'
+    
+    def seed(self, seed=None):
+        """Seed the environment"""
+        try:
+            return self.env.seed(seed)
+        except AttributeError:
+            # For gymnasium, seed action and observation spaces
+            if hasattr(self.action_space, 'seed'):
+                self.action_space.seed(seed)
+            if hasattr(self.observation_space, 'seed'):
+                self.observation_space.seed(seed)
+            return [seed]
 
     def reset(self, **kwargs):
         """ Do no-op action for a number of steps in [1, noop_max]."""
-        self.env.reset(**kwargs)
+        obs, info = self.env.reset(**kwargs)
+            
         if self.override_num_noops is not None:
             noops = self.override_num_noops
         else:
-            noops = self.unwrapped.np_random.randint(1, self.noop_max + 1) #pylint: disable=E1101
+            # Handle both old and new numpy random API
+            try:
+                noops = self.unwrapped.np_random.randint(1, self.noop_max + 1) #pylint: disable=E1101
+            except AttributeError:
+                # New numpy random API uses integers instead of randint
+                noops = self.unwrapped.np_random.integers(1, self.noop_max + 1) #pylint: disable=E1101
         assert noops > 0
-        obs = None
+        
         for _ in range(noops):
-            obs, _, done, _ = self.env.step(self.noop_action)
-            if done:
-                obs = self.env.reset(**kwargs)
-        return obs
+            obs, _, terminated, truncated, _ = self.env.step(self.noop_action)
+            if terminated or truncated:
+                obs, info = self.env.reset(**kwargs)
+        
+        return obs, info
 
     def step(self, ac):
         return self.env.step(ac)
@@ -44,19 +67,32 @@ class FireResetEnv(gym.Wrapper):
         gym.Wrapper.__init__(self, env)
         assert env.unwrapped.get_action_meanings()[1] == 'FIRE'
         assert len(env.unwrapped.get_action_meanings()) >= 3
+    
+    def seed(self, seed=None):
+        """Seed the environment"""
+        try:
+            return self.env.seed(seed)
+        except AttributeError:
+            # For gymnasium, seed action and observation spaces
+            if hasattr(self.action_space, 'seed'):
+                self.action_space.seed(seed)
+            if hasattr(self.observation_space, 'seed'):
+                self.observation_space.seed(seed)
+            return [seed]
 
     def reset(self, **kwargs):
-        self.env.reset(**kwargs)
-        obs, _, done, _ = self.env.step(1)
-        if done:
-            self.env.reset(**kwargs)
-        obs, _, done, _ = self.env.step(2)
-        if done:
-            self.env.reset(**kwargs)
-        return obs
+        obs, info = self.env.reset(**kwargs)
+        obs, _, terminated, truncated, _ = self.env.step(1)
+        if terminated or truncated:
+            obs, info = self.env.reset(**kwargs)
+        obs, _, terminated, truncated, _ = self.env.step(2)
+        if terminated or truncated:
+            obs, info = self.env.reset(**kwargs)
+        return obs, info
 
     def step(self, ac):
-        return self.env.step(ac)
+        obs, reward, terminated, truncated, info = self.env.step(ac)
+        return obs, reward, terminated, truncated, info
 
 class EpisodicLifeEnv(gym.Wrapper):
     def __init__(self, env):
@@ -66,10 +102,23 @@ class EpisodicLifeEnv(gym.Wrapper):
         gym.Wrapper.__init__(self, env)
         self.lives = 0
         self.was_real_done  = True
+    
+    def seed(self, seed=None):
+        """Seed the environment"""
+        try:
+            return self.env.seed(seed)
+        except AttributeError:
+            # For gymnasium, seed action and observation spaces
+            if hasattr(self.action_space, 'seed'):
+                self.action_space.seed(seed)
+            if hasattr(self.observation_space, 'seed'):
+                self.observation_space.seed(seed)
+            return [seed]
 
     def step(self, action):
-        obs, reward, done, info = self.env.step(action)
-        self.was_real_done = done
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        self.was_real_done = terminated or truncated
         # check current lives, make loss of life terminal,
         # then update lives to handle bonus lives
         lives = self.env.unwrapped.ale.lives()
@@ -77,9 +126,9 @@ class EpisodicLifeEnv(gym.Wrapper):
             # for Qbert sometimes we stay in lives == 0 condition for a few frames
             # so it's important to keep lives > 0, so that we only reset once
             # the environment advertises done.
-            done = True
+            terminated = True
         self.lives = lives
-        return obs, reward, done, info
+        return obs, reward, terminated, truncated, info
 
     def reset(self, **kwargs):
         """Reset only when lives are exhausted.
@@ -87,12 +136,13 @@ class EpisodicLifeEnv(gym.Wrapper):
         and the learner need not know about any of this behind-the-scenes.
         """
         if self.was_real_done:
-            obs = self.env.reset(**kwargs)
+            obs, info = self.env.reset(**kwargs)
         else:
             # no-op step to advance from terminal/lost life state
-            obs, _, _, _ = self.env.step(0)
+            obs, _, _, _, info = self.env.step(0)
+            
         self.lives = self.env.unwrapped.ale.lives()
-        return obs
+        return obs, info
 
 class MaxAndSkipEnv(gym.Wrapper):
     def __init__(self, env, skip=4):
@@ -101,26 +151,43 @@ class MaxAndSkipEnv(gym.Wrapper):
         # most recent raw observations (for max pooling across time steps)
         self._obs_buffer = np.zeros((2,)+env.observation_space.shape, dtype=np.uint8)
         self._skip       = skip
+    
+    def seed(self, seed=None):
+        """Seed the environment"""
+        try:
+            return self.env.seed(seed)
+        except AttributeError:
+            # For gymnasium, seed action and observation spaces
+            if hasattr(self.action_space, 'seed'):
+                self.action_space.seed(seed)
+            if hasattr(self.observation_space, 'seed'):
+                self.observation_space.seed(seed)
+            return [seed]
 
     def step(self, action):
         """Repeat action, sum reward, and max over last observations."""
         total_reward = 0.0
-        done = None
+        terminated = False
+        truncated = False
+        info = None
         for i in range(self._skip):
-            obs, reward, done, info = self.env.step(action)
+            obs, reward, term, trunc, info = self.env.step(action)
             if i == self._skip - 2: self._obs_buffer[0] = obs
             if i == self._skip - 1: self._obs_buffer[1] = obs
             total_reward += reward
-            if done:
+            terminated = terminated or term
+            truncated = truncated or trunc
+            if terminated or truncated:
                 break
         # Note that the observation on the done=True frame
         # doesn't matter
         max_frame = self._obs_buffer.max(axis=0)
-
-        return max_frame, total_reward, done, info
+        return max_frame, total_reward, terminated, truncated, info
 
     def reset(self, **kwargs):
-        return self.env.reset(**kwargs)
+        result = self.env.reset(**kwargs)
+        # Handle both gym and gymnasium reset API - maintain the same format
+        return result
 
 
 class StickyActionEnv(gym.Wrapper):
@@ -128,17 +195,37 @@ class StickyActionEnv(gym.Wrapper):
         super(StickyActionEnv, self).__init__(env)
         self.p = p
         self.last_action = 0
+    
+    def seed(self, seed=None):
+        """Seed the environment"""
+        try:
+            return self.env.seed(seed)
+        except AttributeError:
+            # For gymnasium, seed action and observation spaces
+            if hasattr(self.action_space, 'seed'):
+                self.action_space.seed(seed)
+            if hasattr(self.observation_space, 'seed'):
+                self.observation_space.seed(seed)
+            return [seed]
 
-    def reset(self):
+    def reset(self, **kwargs):
         self.last_action = 0
-        return self.env.reset()
+        result = self.env.reset(**kwargs)
+        # Handle both gym and gymnasium reset API - maintain the same format
+        return result
 
     def step(self, action):
-        if self.unwrapped.np_random.uniform() < self.p:
+        # Handle both old and new numpy random API
+        try:
+            random_val = self.unwrapped.np_random.uniform()
+        except AttributeError:
+            random_val = self.unwrapped.np_random.random()
+            
+        if random_val < self.p:
             action = self.last_action
         self.last_action = action
-        obs, reward, done, info = self.env.step(action)
-        return obs, reward, done, info
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        return obs, reward, terminated, truncated, info
 
 
 class ClipRewardEnv(gym.RewardWrapper):
@@ -180,6 +267,18 @@ class WarpFrame(gym.ObservationWrapper):
             original_space = self.observation_space.spaces[self._key]
             self.observation_space.spaces[self._key] = new_space
         assert original_space.dtype == np.uint8 and len(original_space.shape) == 3
+    
+    def seed(self, seed=None):
+        """Seed the environment"""
+        try:
+            return self.env.seed(seed)
+        except AttributeError:
+            # For gymnasium, seed action and observation spaces
+            if hasattr(self.action_space, 'seed'):
+                self.action_space.seed(seed)
+            if hasattr(self.observation_space, 'seed'):
+                self.observation_space.seed(seed)
+            return [seed]
 
     def observation(self, obs):
         if self._key is None:
@@ -216,17 +315,29 @@ class FrameStack(gym.Wrapper):
         self.frames = deque([], maxlen=k)
         shp = env.observation_space.shape
         self.observation_space = spaces.Box(low=0, high=255, shape=(shp[:-1] + (shp[-1] * k,)), dtype=env.observation_space.dtype)
+    
+    def seed(self, seed=None):
+        """Seed the environment"""
+        try:
+            return self.env.seed(seed)
+        except AttributeError:
+            # For gymnasium, seed action and observation spaces
+            if hasattr(self.action_space, 'seed'):
+                self.action_space.seed(seed)
+            if hasattr(self.observation_space, 'seed'):
+                self.observation_space.seed(seed)
+            return [seed]
 
-    def reset(self):
-        ob = self.env.reset()
+    def reset(self, **kwargs):
+        ob, info = self.env.reset(**kwargs)
         for _ in range(self.k):
             self.frames.append(ob)
-        return self._get_ob()
+        return self._get_ob(), info
 
     def step(self, action):
-        ob, reward, done, info = self.env.step(action)
+        ob, reward, terminated, truncated, info = self.env.step(action)
         self.frames.append(ob)
-        return self._get_ob(), reward, done, info
+        return self._get_ob(), reward, terminated, truncated, info
 
     def _get_ob(self):
         assert len(self.frames) == self.k

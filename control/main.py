@@ -5,7 +5,21 @@ import time
 import types
 from collections import deque
 
-import gym
+try:
+    import gymnasium as gym
+    print("Using gymnasium (modern gym)")
+    
+    # Register ALE environments for new gymnasium
+    try:
+        import ale_py
+        gym.register_envs(ale_py)
+        print("ALE environments registered successfully")
+    except Exception as e:
+        print(f"Warning: Failed to register ALE environments: {e}")
+        
+except ImportError:
+    import gym
+    print("Using legacy gym")
 import numpy as np
 import torch
 import torch.nn as nn
@@ -23,7 +37,32 @@ from utils import update_linear_schedule
 
 from running_mean_std import RunningMeanStd
 
+# Import ClearML integration
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from clearml_integration import create_clearml_tracker
+    CLEARML_AVAILABLE = True
+except ImportError:
+    CLEARML_AVAILABLE = False
+    print("ClearML integration not available. Running without experiment tracking.")
+    create_clearml_tracker = None
+
 args = get_args()
+
+# Initialize ClearML tracker if enabled
+clearml_tracker = None
+if args.use_clearml and CLEARML_AVAILABLE and create_clearml_tracker:
+    clearml_tracker = create_clearml_tracker(args, args.clearml_task)
+    if clearml_tracker and clearml_tracker.task:
+        # Log environment information
+        clearml_tracker.log_environment_info(
+            env_name=args.env_name,
+            num_processes=args.num_processes,
+            num_steps=args.num_steps,
+            num_frames=args.num_frames
+        )
 
 assert args.algo in ['a2c', 'ppo', 'acktr']
 if args.recurrent_policy:
@@ -32,10 +71,20 @@ if args.recurrent_policy:
 
 num_updates = int(args.num_frames) // args.num_steps // args.num_processes
 
+# Set all random seeds for reproducibility
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 if args.cuda:
     torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)  # For multi-GPU setups
+
+# Additional settings for reproducibility
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
+# Set random seed for Python's random module (used by some libraries)
+import random
+random.seed(args.seed)
 
 try:
     os.makedirs(args.log_dir)
@@ -197,8 +246,11 @@ def main():
                                                 rollouts.masks[-1]).detach()
 
         rollouts.compute_returns(next_value, args.use_gae, args.gamma, args.tau, gcn_model, args.gcn_alpha)
-        agent.update(rollouts)
+        value_loss, action_loss, dist_entropy = agent.update(rollouts)
         rollouts.after_update()
+        
+        # Store the forward loss (value loss) for logging
+        avg_fwdloss.append(value_loss)
 
 
         ####################### Saving and book-keeping #######################
@@ -251,7 +303,58 @@ def main():
             all_rewards.append(np.mean(episode_rewards))
             if args.use_logger:
                 logger.save_task_results(all_rewards)
+            
+            # Log to ClearML if enabled
+            if clearml_tracker:
+                # Log episode rewards with timesteps as x-axis
+                clearml_tracker.log_episode_rewards(episode_rewards, total_num_steps)
+                
+                # Log training progress with real loss values
+                fps = int(total_num_steps / (end - start))
+                clearml_tracker.log_training_progress(
+                    total_frames=total_num_steps,
+                    fps=fps,
+                    value_loss=value_loss,
+                    action_loss=action_loss,
+                    entropy_loss=dist_entropy,
+                    iteration=total_num_steps  # Use timesteps instead of updates
+                )
+                
+                # Log individual reward metrics with timesteps
+                mean_reward = np.mean(episode_rewards)
+                median_reward = np.median(episode_rewards)
+                min_reward = np.min(episode_rewards)
+                max_reward = np.max(episode_rewards)
+                success_rate = np.count_nonzero(np.greater(episode_rewards, 0)) / len(episode_rewards)
+                
+                # Log each metric separately for better visualization
+                # Mean Reward gets its own completely separate chart
+                clearml_tracker.log_scalar("Mean Reward", "Mean Reward", mean_reward, total_num_steps)
+                
+                # Other reward metrics grouped together
+                clearml_tracker.log_scalar("Other Rewards", "Median Reward", median_reward, total_num_steps)
+                clearml_tracker.log_scalar("Other Rewards", "Min Reward", min_reward, total_num_steps)
+                clearml_tracker.log_scalar("Other Rewards", "Max Reward", max_reward, total_num_steps)
+                clearml_tracker.log_scalar("Other Rewards", "Success Rate", success_rate, total_num_steps)
+                
+                # Log GCN metrics
+                gcn_stats = {
+                    "mean_reward": mean_reward,
+                    "median_reward": median_reward,
+                    "min_reward": min_reward,
+                    "max_reward": max_reward,
+                    "success_rate": success_rate
+                }
+                clearml_tracker.log_gcn_metrics(args.gcn_alpha, gcn_stats, total_num_steps)
+                
         ####################### Saving and book-keeping #######################
+
+    # Finish ClearML task
+    if clearml_tracker:
+        # Upload final model
+        clearml_tracker.log_model(actor_critic, "final_actor_critic")
+        clearml_tracker.log_model(gcn_model, "final_gcn_model")
+        clearml_tracker.finish()
 
     envs.close()
 
