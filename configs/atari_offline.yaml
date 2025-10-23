@@ -1,0 +1,69 @@
+# Atari Offline Dataset Loading Configuration (based on atari.yaml + minari)
+# Usage: python control/main.py --config configs/atari_offline.yaml
+
+# Algorithm settings
+algo: ppo
+
+# Learning parameters
+lr: 2.5e-4
+eps: 1e-5
+alpha: 0.99
+gamma: 0.99
+use_gae: true
+tau: 0.95
+entropy_coef: 0.01
+value_loss_coef: 0.5
+max_grad_norm: 0.5
+
+# Environment settings
+env_name: ZaxxonNoFrameskip-v4
+seed: 0
+num_processes: 8
+num_steps: 128
+num_frames: 10000000
+add_timestep: false
+
+# PPO specific parameters
+ppo_epoch: 4
+num_mini_batch: 4
+clip_param: 0.1
+
+# Logging and saving
+log_interval: 1
+save_interval: 100
+eval_interval: null
+vis_interval: 100
+log_dir: /tmp/gym/
+save_dir: ./saved_models/
+
+# Hardware settings
+cuda: true
+
+# Policy settings
+recurrent_policy: false
+use_linear_lr_decay: false
+
+# Visualization
+vis: false
+port: 8097
+
+# Logging
+use_logger: true
+folder: results
+
+# GCN parameters
+gcn_epochs: 1
+gcn_lr: 1e-3
+gcn_weight_decay: 0e-4
+gcn_hidden: 64
+gcn_alpha: 0.9
+gcn_lambda: 10.0
+reward_freq: 1
+
+# Minari offline dataset settings
+use_minari: true
+
+# ClearML settings
+use_clearml: false
+clearml_project: Phi-GCN-Atari-Offline
+clearml_task: atari_offline_experiment

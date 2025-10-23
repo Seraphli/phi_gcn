@@ -88,6 +88,9 @@ class Logger(object):
             Save the command line arguments
             """
             with open(os.path.join(self.save_folder, 'params.json'), 'w') as f:
-                  json.dump(dict(args._get_kwargs()), f)
+                  if hasattr(args, 'to_dict'):
+                        json.dump(args.to_dict(), f)
+                  else:
+                        json.dump(dict(args._get_kwargs()), f)
 
 

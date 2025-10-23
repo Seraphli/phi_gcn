@@ -1,28 +1,10 @@
 import copy
 import glob
-import os
 import time
 import types
 from collections import deque
+import random
 
-try:
-    import gymnasium as gym
-
-    print("Using gymnasium (modern gym)")
-
-    # Register ALE environments for new gymnasium
-    try:
-        import ale_py
-
-        gym.register_envs(ale_py)
-        print("ALE environments registered successfully")
-    except Exception as e:
-        print(f"Warning: Failed to register ALE environments: {e}")
-
-except ImportError:
-    import gym
-
-    print("Using legacy gym")
 import numpy as np
 import torch
 import torch.nn as nn
@@ -30,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import algo
-from arguments import get_args
+from config import get_args
 from envs import make_vec_envs
 from model import Policy
 from storage import RolloutStorage
@@ -39,6 +21,9 @@ import scipy.sparse as sp
 from utils import update_linear_schedule
 
 from running_mean_std import RunningMeanStd
+
+# Import offline data loading
+from offline_data import MinariDatasetLoader
 
 # Import ClearML integration
 import sys
@@ -87,7 +72,6 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 # Set random seed for Python's random module (used by some libraries)
-import random
 
 random.seed(args.seed)
 
@@ -216,6 +200,15 @@ def main():
     rew_rms = RunningMeanStd(shape=())
     delay_rew = torch.zeros([args.num_processes, 1])
     delay_step = torch.zeros([args.num_processes])
+
+    ############################
+    # Offline Data Loading
+    offline_dataset = None
+    if args.use_minari:
+        # Load the dataset based on environment name
+        minari_loader = MinariDatasetLoader()
+        offline_dataset = minari_loader.load_dataset(args.env_name)
+    ############################
 
     start = time.time()
     for j in range(num_updates):
