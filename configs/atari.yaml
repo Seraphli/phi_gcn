@@ -66,4 +66,4 @@ use_minari: false
 # ClearML settings
 use_clearml: false
 clearml_project: Phi-GCN-Atari
-clearml_task: atari_experiment
+clearml_task: null

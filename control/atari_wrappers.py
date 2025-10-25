@@ -1,19 +1,12 @@
-import numpy as np
-import os
-
-os.environ.setdefault("PATH", "")
 from collections import deque
 
-try:
-    import gymnasium as gym
-    from gymnasium import spaces
-except ImportError:
-    import gym
-    from gym import spaces
 import cv2
+import gymnasium as gym
+import numpy as np
+from gymnasium import spaces
+from wrappers import TimeLimit
 
 cv2.ocl.setUseOpenCL(False)
-from wrappers import TimeLimit
 
 
 class NoopResetEnv(gym.Wrapper):
@@ -60,18 +53,6 @@ class FireResetEnv(gym.Wrapper):
         assert env.unwrapped.get_action_meanings()[1] == "FIRE"
         assert len(env.unwrapped.get_action_meanings()) >= 3
 
-    def seed(self, seed=None):
-        """Seed the environment"""
-        try:
-            return self.env.seed(seed)
-        except AttributeError:
-            # For gymnasium, seed action and observation spaces
-            if hasattr(self.action_space, "seed"):
-                self.action_space.seed(seed)
-            if hasattr(self.observation_space, "seed"):
-                self.observation_space.seed(seed)
-            return [seed]
-
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         obs, _, terminated, truncated, _ = self.env.step(1)
@@ -95,18 +76,6 @@ class EpisodicLifeEnv(gym.Wrapper):
         gym.Wrapper.__init__(self, env)
         self.lives = 0
         self.was_real_done = True
-
-    def seed(self, seed=None):
-        """Seed the environment"""
-        try:
-            return self.env.seed(seed)
-        except AttributeError:
-            # For gymnasium, seed action and observation spaces
-            if hasattr(self.action_space, "seed"):
-                self.action_space.seed(seed)
-            if hasattr(self.observation_space, "seed"):
-                self.observation_space.seed(seed)
-            return [seed]
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
@@ -146,18 +115,6 @@ class MaxAndSkipEnv(gym.Wrapper):
         self._obs_buffer = np.zeros((2,) + env.observation_space.shape, dtype=np.uint8)
         self._skip = skip
 
-    def seed(self, seed=None):
-        """Seed the environment"""
-        try:
-            return self.env.seed(seed)
-        except AttributeError:
-            # For gymnasium, seed action and observation spaces
-            if hasattr(self.action_space, "seed"):
-                self.action_space.seed(seed)
-            if hasattr(self.observation_space, "seed"):
-                self.observation_space.seed(seed)
-            return [seed]
-
     def step(self, action):
         """Repeat action, sum reward, and max over last observations."""
         total_reward = 0.0
@@ -191,18 +148,6 @@ class StickyActionEnv(gym.Wrapper):
         super(StickyActionEnv, self).__init__(env)
         self.p = p
         self.last_action = 0
-
-    def seed(self, seed=None):
-        """Seed the environment"""
-        try:
-            return self.env.seed(seed)
-        except AttributeError:
-            # For gymnasium, seed action and observation spaces
-            if hasattr(self.action_space, "seed"):
-                self.action_space.seed(seed)
-            if hasattr(self.observation_space, "seed"):
-                self.observation_space.seed(seed)
-            return [seed]
 
     def reset(self, **kwargs):
         self.last_action = 0
@@ -264,18 +209,6 @@ class WarpFrame(gym.ObservationWrapper):
             self.observation_space.spaces[self._key] = new_space
         assert original_space.dtype == np.uint8 and len(original_space.shape) == 3
 
-    def seed(self, seed=None):
-        """Seed the environment"""
-        try:
-            return self.env.seed(seed)
-        except AttributeError:
-            # For gymnasium, seed action and observation spaces
-            if hasattr(self.action_space, "seed"):
-                self.action_space.seed(seed)
-            if hasattr(self.observation_space, "seed"):
-                self.observation_space.seed(seed)
-            return [seed]
-
     def observation(self, obs):
         if self._key is None:
             frame = obs
@@ -316,18 +249,6 @@ class FrameStack(gym.Wrapper):
             shape=(shp[:-1] + (shp[-1] * k,)),
             dtype=env.observation_space.dtype,
         )
-
-    def seed(self, seed=None):
-        """Seed the environment"""
-        try:
-            return self.env.seed(seed)
-        except AttributeError:
-            # For gymnasium, seed action and observation spaces
-            if hasattr(self.action_space, "seed"):
-                self.action_space.seed(seed)
-            if hasattr(self.observation_space, "seed"):
-                self.observation_space.seed(seed)
-            return [seed]
 
     def reset(self, **kwargs):
         ob, info = self.env.reset(**kwargs)

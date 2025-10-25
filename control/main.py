@@ -44,7 +44,7 @@ args = get_args()
 # Initialize ClearML tracker if enabled
 clearml_tracker = None
 if args.use_clearml and CLEARML_AVAILABLE and create_clearml_tracker:
-    clearml_tracker = create_clearml_tracker(args, args.clearml_task)
+    clearml_tracker = create_clearml_tracker(args)
     if clearml_tracker and clearml_tracker.task:
         # Log environment information
         clearml_tracker.log_environment_info(
@@ -197,17 +197,19 @@ def main():
 
     episode_rewards = deque(maxlen=100)
     avg_fwdloss = deque(maxlen=100)
+    avg_gcn_loss = deque(maxlen=100)
     rew_rms = RunningMeanStd(shape=())
     delay_rew = torch.zeros([args.num_processes, 1])
     delay_step = torch.zeros([args.num_processes])
 
     ############################
     # Offline Data Loading
-    offline_dataset = None
+    minari_loader = None
     if args.use_minari:
-        # Load the dataset based on environment name
         minari_loader = MinariDatasetLoader()
         offline_dataset = minari_loader.load_dataset(args.env_name)
+        minari_loader.compute_state_values(args.gamma, device)
+        rollouts.minari_loader = minari_loader
     ############################
 
     start = time.time()
@@ -266,16 +268,16 @@ def main():
                             if len(Gs[idx].nodes)
                             else sp.csr_matrix(np.eye(1, dtype="int64"))
                         )
-                        update_graph(
+                        loss = update_graph(
                             gcn_model,
                             gcn_optimizer,
                             torch.stack(gcn_states[idx]),
                             adj,
                             rew_states[idx],
-                            gcn_loss,
                             args,
                             envs,
                         )
+                        avg_gcn_loss.append(loss)
                         gcn_states[idx] = []
                         Gs[idx] = nx.Graph()
                         node_ptrs[idx] = 0
@@ -300,6 +302,24 @@ def main():
                 rollouts.recurrent_hidden_states[-1],
                 rollouts.masks[-1],
             ).detach()
+
+        # Update GCN with offline data before computing returns
+        if minari_loader is not None and args.gcn_alpha < 1.0:
+            graph_data_list = minari_loader.build_graph_data_from_offline(
+                actor_critic, device
+            )
+
+            for graph_data in graph_data_list:
+                loss = update_graph(
+                    gcn_model,
+                    gcn_optimizer,
+                    graph_data["features"],
+                    graph_data["adj"],
+                    graph_data["rew_states"],
+                    args,
+                    envs,
+                )
+                avg_gcn_loss.append(loss)
 
         rollouts.compute_returns(
             next_value, args.use_gae, args.gamma, args.tau, gcn_model, args.gcn_alpha
@@ -347,6 +367,7 @@ def main():
 
         if j % args.log_interval == 0 and len(episode_rewards) > 1:
             end = time.time()
+
             print(
                 "Updates {}, num timesteps {}, FPS {} \n Last {}\
              training episodes: mean/median reward {:.2f}/{:.2f},\
@@ -414,17 +435,15 @@ def main():
                     "Other Rewards", "Success Rate", success_rate, total_num_steps
                 )
 
-                # Log GCN metrics
-                gcn_stats = {
-                    "mean_reward": mean_reward,
-                    "median_reward": median_reward,
-                    "min_reward": min_reward,
-                    "max_reward": max_reward,
-                    "success_rate": success_rate,
-                }
-                clearml_tracker.log_gcn_metrics(
-                    args.gcn_alpha, gcn_stats, total_num_steps
-                )
+                # Log GCN loss
+                if len(avg_gcn_loss) > 0:
+                    mean_gcn_loss = np.mean(avg_gcn_loss)
+                    clearml_tracker.log_scalar(
+                        "GCN Training",
+                        "Average GCN Loss",
+                        mean_gcn_loss,
+                        total_num_steps,
+                    )
 
         ####################### Saving and book-keeping #######################
 
