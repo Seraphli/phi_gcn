@@ -234,6 +234,8 @@ class TransposeImage(gym.ObservationWrapper):
         )
 
     def observation(self, observation):
+        # Convert to numpy array (handles LazyFrames and regular arrays)
+        observation = np.array(observation)
         return observation.transpose(2, 1, 0)
 
 

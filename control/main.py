@@ -1,28 +1,10 @@
 import copy
 import glob
-import os
 import time
 import types
 from collections import deque
+import random
 
-try:
-    import gymnasium as gym
-
-    print("Using gymnasium (modern gym)")
-
-    # Register ALE environments for new gymnasium
-    try:
-        import ale_py
-
-        gym.register_envs(ale_py)
-        print("ALE environments registered successfully")
-    except Exception as e:
-        print(f"Warning: Failed to register ALE environments: {e}")
-
-except ImportError:
-    import gym
-
-    print("Using legacy gym")
 import numpy as np
 import torch
 import torch.nn as nn
@@ -30,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import algo
-from arguments import get_args
+from config import get_args
 from envs import make_vec_envs
 from model import Policy
 from storage import RolloutStorage
@@ -59,7 +41,7 @@ args = get_args()
 # Initialize ClearML tracker if enabled
 clearml_tracker = None
 if args.use_clearml and CLEARML_AVAILABLE and create_clearml_tracker:
-    clearml_tracker = create_clearml_tracker(args, args.clearml_task)
+    clearml_tracker = create_clearml_tracker(args)
     if clearml_tracker and clearml_tracker.task:
         # Log environment information
         clearml_tracker.log_environment_info(
@@ -87,7 +69,6 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 # Set random seed for Python's random module (used by some libraries)
-import random
 
 random.seed(args.seed)
 
@@ -213,6 +194,7 @@ def main():
 
     episode_rewards = deque(maxlen=100)
     avg_fwdloss = deque(maxlen=100)
+    avg_gcn_loss = deque(maxlen=100)
     rew_rms = RunningMeanStd(shape=())
     delay_rew = torch.zeros([args.num_processes, 1])
     delay_step = torch.zeros([args.num_processes])
@@ -273,16 +255,16 @@ def main():
                             if len(Gs[idx].nodes)
                             else sp.csr_matrix(np.eye(1, dtype="int64"))
                         )
-                        update_graph(
+                        loss = update_graph(
                             gcn_model,
                             gcn_optimizer,
                             torch.stack(gcn_states[idx]),
                             adj,
                             rew_states[idx],
-                            gcn_loss,
                             args,
                             envs,
                         )
+                        avg_gcn_loss.append(loss)
                         gcn_states[idx] = []
                         Gs[idx] = nx.Graph()
                         node_ptrs[idx] = 0
@@ -354,6 +336,7 @@ def main():
 
         if j % args.log_interval == 0 and len(episode_rewards) > 1:
             end = time.time()
+
             print(
                 "Updates {}, num timesteps {}, FPS {} \n Last {}\
              training episodes: mean/median reward {:.2f}/{:.2f},\
@@ -421,17 +404,15 @@ def main():
                     "Other Rewards", "Success Rate", success_rate, total_num_steps
                 )
 
-                # Log GCN metrics
-                gcn_stats = {
-                    "mean_reward": mean_reward,
-                    "median_reward": median_reward,
-                    "min_reward": min_reward,
-                    "max_reward": max_reward,
-                    "success_rate": success_rate,
-                }
-                clearml_tracker.log_gcn_metrics(
-                    args.gcn_alpha, gcn_stats, total_num_steps
-                )
+                # Log GCN loss
+                if len(avg_gcn_loss) > 0:
+                    mean_gcn_loss = np.mean(avg_gcn_loss)
+                    clearml_tracker.log_scalar(
+                        "GCN Training",
+                        "Average GCN Loss",
+                        mean_gcn_loss,
+                        total_num_steps,
+                    )
 
         ####################### Saving and book-keeping #######################
 

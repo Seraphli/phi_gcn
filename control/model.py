@@ -18,7 +18,7 @@ class Policy(nn.Module):
             base_kwargs = {}
 
         if len(obs_shape) == 3:
-            self.base = CNNBase(obs_shape[0],env_name, **base_kwargs)
+            self.base = CNNBase(obs_shape[0], env_name, **base_kwargs)
         elif len(obs_shape) == 1:
             self.base = MLPBase(obs_shape[0], **base_kwargs)
         else:
@@ -74,7 +74,6 @@ class Policy(nn.Module):
 
 
 class NNBase(nn.Module):
-
     def __init__(self, recurrent, recurrent_input_size, hidden_size):
         super(NNBase, self).__init__()
 
@@ -135,7 +134,7 @@ class Print(nn.Module):
         super(Print, self).__init__()
 
     def forward(self, x):
-        print('layer input:', x.shape)
+        print("layer input:", x.shape)
         return x
 
 
@@ -143,40 +142,47 @@ class CNNBase(NNBase):
     def __init__(self, num_inputs, env_name, recurrent=False, hidden_size=128):
         super(CNNBase, self).__init__(recurrent, hidden_size, hidden_size)
 
-        init_ = lambda m: init(m,
+        init_ = lambda m: init(
+            m,
             nn.init.orthogonal_,
             lambda x: nn.init.constant_(x, 0),
-            nn.init.calculate_gain('relu'))
+            nn.init.calculate_gain("relu"),
+        )
 
         if "MiniWorld" in env_name:
-            finalsize=32*6*4
+            finalsize = 32 * 6 * 4
         else:
-            finalsize=32*7*7
+            finalsize = 32 * 7 * 7
         self.main = nn.Sequential(
-            init_(nn.Conv2d(num_inputs, 32, 8, stride=4)), nn.ReLU(),
-            init_(nn.Conv2d(32, 64, 4, stride=2)), nn.ReLU(),
-            init_(nn.Conv2d(64, 32, 3, stride=1)), nn.ReLU(), Flatten(),
-#            init_(nn.Linear(32 * 6 * 4, hidden_size)), nn.ReLU()
-            init_(nn.Linear(finalsize, hidden_size)), nn.ReLU()
-            )
+            init_(nn.Conv2d(num_inputs, 32, 8, stride=4)),
+            nn.ReLU(),
+            init_(nn.Conv2d(32, 64, 4, stride=2)),
+            nn.ReLU(),
+            init_(nn.Conv2d(64, 32, 3, stride=1)),
+            nn.ReLU(),
+            Flatten(),
+            #            init_(nn.Linear(32 * 6 * 4, hidden_size)), nn.ReLU()
+            init_(nn.Linear(finalsize, hidden_size)),
+            nn.ReLU(),
+        )
 
-        init_ = lambda m: init(m,
-            nn.init.orthogonal_,
-            lambda x: nn.init.constant_(x, 0))
+        init_ = lambda m: init(
+            m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0)
+        )
 
         self.critic_linear = init_(nn.Linear(hidden_size, 1))
 
         self.train()
 
     def forward(self, inputs, rnn_hxs, masks):
-        #print(inputs.size())
+        # print(inputs.size())
 
         x = inputs / 255.0
-        #print(x.size())
+        # print(x.size())
 
         x = self.main(x)
         # import pdb;pdb.set_trace()
-        #print(x.size())
+        # print(x.size())
 
         if self.is_recurrent:
             x, rnn_hxs = self._forward_gru(x, rnn_hxs, masks)
@@ -191,22 +197,20 @@ class MLPBase(NNBase):
         if recurrent:
             num_inputs = hidden_size
 
-        init_ = lambda m: init(m,
-            init_normc_,
-            lambda x: nn.init.constant_(x, 0))
+        init_ = lambda m: init(m, init_normc_, lambda x: nn.init.constant_(x, 0))
 
         self.actor = nn.Sequential(
             init_(nn.Linear(num_inputs, hidden_size)),
             nn.Tanh(),
             init_(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh()
+            nn.Tanh(),
         )
 
         self.critic = nn.Sequential(
             init_(nn.Linear(num_inputs, hidden_size)),
             nn.Tanh(),
             init_(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh()
+            nn.Tanh(),
         )
 
         self.critic_linear = init_(nn.Linear(hidden_size, 1))

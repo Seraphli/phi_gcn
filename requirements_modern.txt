@@ -17,6 +17,9 @@ cloudpickle>=2.0.0
 # Experiment tracking and logging
 clearml>=1.13.0    # For experiment tracking and results upload
 
+# Configuration management
+PyYAML>=6.0        # For YAML configuration files
+
 # Optional MuJoCo support (if needed)
 # mujoco>=2.3.0
 # gymnasium[mujoco]

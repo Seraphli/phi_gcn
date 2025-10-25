@@ -4,19 +4,20 @@ import os
 import time
 import json
 import numpy as np
-#from envs import VecNormalize
+# from envs import VecNormalize
 
 
 # Get a render function
 def get_render_func(venv):
-    if hasattr(venv, 'envs'):
+    if hasattr(venv, "envs"):
         return venv.envs[0].render
-    elif hasattr(venv, 'venv'):
+    elif hasattr(venv, "venv"):
         return get_render_func(venv.venv)
-    elif hasattr(venv, 'env'):
+    elif hasattr(venv, "env"):
         return get_render_func(venv.env)
 
     return None
+
 
 """
 def get_vec_normalize(venv):
@@ -33,7 +34,8 @@ def update_linear_schedule(optimizer, epoch, total_num_epochs, initial_lr):
     """Decreases the learning rate linearly"""
     lr = initial_lr - (initial_lr * (epoch / float(total_num_epochs)))
     for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
+        param_group["lr"] = lr
+
 
 # Necessary for my KFAC implementation.
 class AddBias(nn.Module):
@@ -62,32 +64,35 @@ def init_normc_(weight, gain=1):
     weight *= gain / torch.sqrt(weight.pow(2).sum(1, keepdim=True))
 
 
+create_folder = lambda f: [os.makedirs(f) if not os.path.exists(f) else False]
 
-create_folder = lambda f: [ os.makedirs(f) if not os.path.exists(f) else False ]
+
 class Logger(object):
-      def __init__(self, algo_name='', environment_name='', folder='./results',seed=0):
-            """
-            Saves experimental metrics for use later.
-            :param experiment_name: name of the experiment
-            :param folder: location to save data
-            : param environment_name: name of the environment
-            """
+    def __init__(self, algo_name="", environment_name="", folder="./results", seed=0):
+        """
+        Saves experimental metrics for use later.
+        :param experiment_name: name of the experiment
+        :param folder: location to save data
+        : param environment_name: name of the environment
+        """
 
-            self.save_folder = os.path.join(folder, algo_name, 'seed' + str(seed) + '_' + time.strftime('%y-%m-%d-%H-%M-%s'))
+        self.save_folder = os.path.join(
+            folder,
+            algo_name,
+            "seed" + str(seed) + "_" + time.strftime("%y-%m-%d-%H-%M-%s"),
+        )
 
-            create_folder(self.save_folder)
+        create_folder(self.save_folder)
 
-      def save_task_results(self, task_rewards):
-
+    def save_task_results(self, task_rewards):
         np.save(os.path.join(self.save_folder, "task_rewards.npy"), task_rewards)
 
-
-
-      def save_args(self, args):
-            """
-            Save the command line arguments
-            """
-            with open(os.path.join(self.save_folder, 'params.json'), 'w') as f:
-                  json.dump(dict(args._get_kwargs()), f)
-
-
+    def save_args(self, args):
+        """
+        Save the command line arguments
+        """
+        with open(os.path.join(self.save_folder, "params.json"), "w") as f:
+            if hasattr(args, "to_dict"):
+                json.dump(args.to_dict(), f)
+            else:
+                json.dump(dict(args._get_kwargs()), f)
